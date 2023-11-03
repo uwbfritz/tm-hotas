@@ -1,0 +1,303 @@
+// -----------------------------------------------------------------------------
+//  Throttle Switch Synchro Module for Thrustmaster TARGET (HOTAS Warthog)
+// -----------------------------------------------------------------------------
+//  Throttle Switch Synchro Module header
+//  Version:  1.0
+//  Author:   Sedenion
+// -----------------------------------------------------------------------------
+//  Desc:
+//  Functions and definitions for the Throttle Switch Synchro Module. This module 
+//  provide HOTAS Warthog Throtle switchs synchronization when specified button 
+//  is pressed.
+// 
+//  Usage:
+//  The module allow to define a trigger button which will force Throttle 
+//  switches to be pressed again at their current position. So to say, it forces 
+//  synchronization of switchs with game status. For example, if a switch 
+//  selects a weapon, the weapon will be forced to be selected (without acting 
+//  on the switch) when the specified button is pressed.
+//
+//  The module does not support multi-layer mapping for trigger buttons,
+//  however, the synchronization is made according the current layer and mapping
+//  applied to switchs.
+//
+//  I) Installation
+//
+//    - Include this file using the "include" keywork in your main
+//      tmc profile file.
+//
+//      example:
+//              include "sws.tmh"
+//
+//    - Add a call to the SwsMapping() function within the EventHandle() 
+//      function with proper parameters.
+//     
+//      example: 
+//              int EventHandle(int type, alias o, int x)
+//              {
+//                DefaultMapping(&o, x);
+//                SwsMapping(&o, x);
+//              }
+//
+//  II) Define Synchro trigger & mask
+//    
+//    - Within the main() function, you must define which button will force 
+//      synchronization for which Throttle switch(s) using the MapSync() 
+//      function. 
+//      
+//      example:
+//              MapSync(&Throttle, EACON, BS);
+//
+//
+//    - One trigger button can force synchronization on several selected 
+//      switchs, you have to define the list of switchs to synchronize using 
+//      a bitwise OR mask. A bitwise OR mask is a list of value separated by
+//      the binary | (OR) operator.
+//
+//      example: 
+//              MapSync(&Throttle, RDRNRM, BS|RDR|APU|PS);
+//
+//    - Available mask are the following:
+//        PS : Pinky Switch
+//        SPD : Speedbrake
+//        BS : Boat Switch
+//        FLAP : Flaps
+//        EAC : EAC Switch
+//        RDR : RDR Switch
+//        AP : AP Switch
+//        APU : APU Switch
+//        EOL : Engine Operate Left
+//        EOR : Engine Operate Right
+//        EFL : Engine Fuel Flow Left
+//        EFR : Engine Fuel Flow Right
+//
+// -----------------------------------------------------------------------------
+
+// ----------------------------- Global Defines --------------------------------
+
+// HOTAS Warthog Throttle switchs mask bits
+define  PS      0x001     // Pinky switch
+define  SPD     0x002     // Speadbrakes switch
+define  BS      0x004     // Boat switch
+define  FLAP    0x008     // FLaps switch
+define  EAC     0x010     // EAC switch
+define  RDR     0x020     // RDR switch
+define  AP      0x040     // AP switch
+define  APU     0x080     // APU switch
+define  EOL     0x100     // Engine Operate Left switch
+define  EOR     0x200     // Engine Operate Right switch
+define  EFL     0x400     // Engine Fuel Flow Left switch
+define  EFR     0x800     // Engine Fuel Flow Right switch
+
+// Throttle Switch Synchro Mapping structure
+struct stSWSMap
+{
+  int   dev;
+  int   btn;
+  int   msk;
+}
+
+// ---------------------------- Global Variables -------------------------------
+
+byte      SwsEnabled  = 0;                // Module enable flag
+stSWSMap  SwsMap[32];                     // Synchro Map list
+int       SwsCnt      = 0;                // Synchro Map count
+int       SwsDelay    = 100;               // Default delay between buttons hit
+
+
+// ---------------------------- Global Functions -------------------------------
+
+
+// Sync Virtual Buttons.
+//
+// Force Throttle virtual buttons such as switch middle or off position to be 
+// enabled in button table. This function call the DefEventHandler() routine to 
+// force button table completion.
+//
+int SyncVirtualBtn()
+{
+
+  DefEventHandler(8, &Throttle, EACON);
+  DefEventHandler(8, &Throttle, RDRNRM);
+  DefEventHandler(8, &Throttle, APUON);
+  DefEventHandler(8, &Throttle, EOLMOTOR);
+  DefEventHandler(8, &Throttle, EORMOTOR);
+  DefEventHandler(8, &Throttle, EFLNORM);
+  DefEventHandler(8, &Throttle, EFRNORM);
+  DefEventHandler(8, &Throttle, PSF);
+  DefEventHandler(8, &Throttle, PSB);
+  DefEventHandler(8, &Throttle, BSF);
+  DefEventHandler(8, &Throttle, BSB);
+  DefEventHandler(8, &Throttle, SPDF);
+  DefEventHandler(8, &Throttle, SPDB);
+  DefEventHandler(8, &Throttle, APPAT);
+  DefEventHandler(8, &Throttle, APALT);
+  DefEventHandler(8, &Throttle, FLAPU);
+  DefEventHandler(8, &Throttle, FLAPD);
+  DefEventHandler(8, &Throttle, CHF);
+  DefEventHandler(8, &Throttle, CHB);
+  
+  return 0;
+}
+
+// ---------------------------- Mapping Functions ------------------------------
+
+// Map button for switchs synchro.
+//
+// - param[in] dev Button input device.
+// - param[in] btn Button index.
+// - param[in] msk bitwise OR mask for switch to synch. Available mask are:
+//                    PS (Pinky Switch), SPD (Speedbrake), BS (Boat Switch),
+//                    FLAP (Flaps), EAC (EAC Switch), RDR (RDR Switch),
+//                    AP (AP Switch), APU (APU Switch), EOL (Engine Operate Left),
+//                    EOR (Engine Operate Right), EFL (Engine Fuel Flow Left),
+//                    EFR (Engine Fuel Flow Right),
+//
+// - return 0 if operation succeed, 1 if mapping stack is full (32 button max).
+//
+// Defines a button to force the specified Throttle switchs to synchronize.
+//
+int MapSync(alias dev, int btn, int msk)
+{
+  if(SwsCnt < 32) {
+  
+    SwsMap[SwsCnt].dev = &dev;
+    SwsMap[SwsCnt].btn = btn;
+    SwsMap[SwsCnt].msk = msk;
+    
+    SwsCnt = SwsCnt + 1;
+
+    if(!SwsEnabled) {
+      SwsEnabled = 1;
+      printf("Module enabled : Throttle Switchs Synchro\xa");
+    }
+      
+    return 0;
+  }
+  
+  return 1; // error
+}
+
+
+// Button Hit function
+//
+// - param[in] l UMD Layer index.
+// - param[in] k Mapping array.
+// - param[in] b Button Id.
+// - param[in] d Defered call delay.
+//
+// - return always 0.
+//
+// Performs event handling to generate keystrokes according device states. This 
+// function is the  event callback routine who must be called within the 
+// EventHandle() function.
+//
+int SwsHitBtn(int l, alias k, int b, int d)
+{
+  Map(&k,&&devdata.keymap+b*KDATASIZE*4); 
+  DeferCall(d, &ActKey, KEYON+k[l]);
+  return 0;
+}
+
+// ---------------------------- Callback Function ------------------------------
+
+// Event Callback for Switchs Synchro.
+//
+// - param[in] o Event device.
+// - param[in] x Event button.
+//
+// - return always 0.
+//
+// Performs event handling to generate keystrokes according device states. This 
+// function is the  event callback routine who must be called within the 
+// EventHandle() function.
+//
+int SwsMapping(alias o, int x)
+{
+  int i;
+  int l;
+  int k;
+  int d;
+  int b;
+
+  if(SwsEnabled) {
+    
+    Dim(&k, 6);
+    // get current IOUMD layer index
+	l = ((2 - (layer_sw[5]*2)) + (layer_sw[8]*2)) + layer_sw[2];
+	
+    // for each trigger button
+    i = 0;
+    
+    while(i < SwsCnt) {
+      
+      // check event on device & button
+      if(&o == SwsMap[i].dev & x == SwsMap[i].btn) {
+        // if button pressed
+        if(o[x]) {
+          
+          // get keymap for Throttle
+          GetDeviceData(&Throttle);
+          
+          // base delay 
+          d = SwsDelay;
+          
+          // check sync mask and emul button press
+          if(SwsMap[i].msk & PS) {
+            if(Throttle[PSB]) { b = PSB; } else if (Throttle[PSF]) { b = PSF; } else { b = PSM; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & SPD) {
+          	if(Throttle[SPDB]) { b = SPDB; } else if (Throttle[SPDF]) { b = SPDF; } else { b = SPDM; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & BS) {
+          	if(Throttle[BSB]) { b = BSB; } else if (Throttle[BSF]) { b = BSF; } else { b = BSM; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & FLAP) {
+          	if(Throttle[FLAPU]) { b = FLAPU; } else if (Throttle[FLAPD]) { b = FLAPD; } else { b = FLAPM; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & EAC) {
+          	if(Throttle[EACON]) { b = EACON; } else { b = EACOFF; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & RDR) {
+          	if(Throttle[RDRNRM]) { b = RDRNRM; } else { b = RDRDIS; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & AP) {
+            if(Throttle[APPAT]) { b = APPAT; } else if (Throttle[APALT]) { b = APALT; } else { b = APAH; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & APU) {
+          	if(Throttle[APUON]) { b = APUON; } else { b = APUOFF; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & EOL) {
+          	if(Throttle[EOLNORM]) { b = EOLNORM; } else { b = EOLMOTOR; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & EOR) {
+          	if(Throttle[EORNORM]) { b = EORNORM; } else { b = EORMOTOR; }
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & EFL) {
+          	if(Throttle[EFLNORM]) { b = EFLNORM; } else { b = EFLOVER; } 
+            SwsHitBtn(l, &k, b, d); d = d + SwsDelay;
+          }
+          if(SwsMap[i].msk & EFR) {
+          	if(Throttle[EFRNORM]) { b = EFRNORM; } else { b = EFROVER; }
+            SwsHitBtn(l, &k, b, &d); d = d + SwsDelay;
+          }
+        }
+      }
+      
+      i = i + 1;
+    }
+    
+  }
+  
+  return 0;
+}

@@ -1,0 +1,218 @@
+// -----------------------------------------------------------------------------
+//  AP Control Module for Thrustmaster TARGET (HOTAS Warthog)
+// -----------------------------------------------------------------------------
+//  AP Control module header
+//  Version:  1.0
+//  Author:   Sedenion
+// -----------------------------------------------------------------------------
+//  Desc:
+//  Functions and definitions for the AP Control module. This module provide 
+//  advanced handling for the AP button and the associated 3-position switch 
+//  APPAT / APAH / APALT.
+//
+//
+//  Usage: 
+//  The module works only with Warthog Throttle Autopilot dedicated buttons and 
+//  switch: APENG / APDIS button and APPAT / APAH / APALT switch.
+//
+//  while the AP button toggle Autopilot, the AP switch position is analysed to 
+//  send inputs to select the proper Autopilot mode. Also, if Autopilot is 
+//  disabled, the switch is disabled.
+//
+//  A control LED can be configured to show if Autopilot is enabled or disabled.
+//
+//  The module does not support multi-layer mapping, all mapping are defined for 
+//  all UMDIO layers.
+//
+//
+//  I) Installation
+//
+//    - Include this file using the "include" keywork in your main
+//      tmc profile file.
+//
+//      example:
+//              include "ap_control.tmh"
+//
+//    - Add a call to the APcMapping() function within the EventHandle() 
+//      function with proper parameters.
+//     
+//      example: 
+//              int EventHandle(int type, alias o, int x)
+//              {
+//                DefaultMapping(&o, x);
+//                APcMapping(&o, x);
+//              }
+//
+//
+//  II) Action and LED Mapping
+//
+//    - Within the main() function, you must define the key/command you 
+//      want to be mapped for each action using the APcMapKey() function.
+//
+//      example: 
+//              APcMapKey( APENG, Autopilot_Enable );
+//              APcMapKey( APDIS, Autopilot_Disconnect );
+//              APcMapKey( APALT, Autopilot_Hold_Alt_Mode );
+//              APcMapKey( APAH,  Autopilot_Hold_Attitude_Mode );
+//              APcMapKey( APPAT, Autopilot_Route_Follow_Mode );
+//
+//    - Within the main() function, you should also define the LED to enable 
+//      when the AP module is running using the APcMapLed() function.
+//
+//      example:
+//              APcMapLed(LED1);
+//
+// -----------------------------------------------------------------------------
+
+// ---------------------------- Global Variables -------------------------------
+
+byte  APcEnabled = 0;                                   // Module enable flag
+int   APcBtn[5] = {APENG, APDIS, APPAT, APAH, APALT};
+int   APcMap[5] = {0,0,0,0,0};                          // Mapping list
+int   APcLed = 0;                                       // Throttle Control LED index
+int   APcCur = 0;                                       // Current selected AP mode
+byte  APcRun = 0;                                       // Module running flag
+
+
+// ---------------------------- Mapping Functions ------------------------------
+
+// MapKey for AP Control.
+//
+// - param[in] btn AP button ( APENG, APDIS, APALT, APAH or APPAT )
+// - param[in] key Keystroke/command.
+//
+// Associate keystrokes with the specified AP action or switch position.
+//
+int APcMapKey(int btn, int key)
+{
+  int i = 0;
+  
+  while(i < 5) {
+  
+    if(btn == APcBtn[i]) {
+    
+      APcMap[i] = key;
+      MapKey(&Throttle, btn, 0); // disable default DX button
+      
+      if(!APcEnabled) {
+        APcEnabled = 1;
+        printf("Module enabled : AP Control\xa");
+      }
+      
+      return 0;
+    }
+    
+    i = i + 1;
+  }
+  
+  return 1; // error
+}
+
+
+// Assign LED for AP Control.
+//
+// - param[in] led LED to be enabled while AP is running.
+//
+// Defines the LED to be enabled when AP module is running.
+//
+int APcMapLed(int led)
+{
+  APcLed = led;
+}
+
+
+// ---------------------------- Callback Function ------------------------------
+
+
+// Event Callback for AP Control.
+//
+// - param[in] o Event device.
+// - param[in] x Event button.
+//
+// - return always 0.
+//
+// Performs event handling to generate keystrokes according device states. This 
+// function is the  event callback routine who must be called within the 
+// EventHandle() function.
+//
+int APcMapping(alias o, int x)
+{
+
+  if(APcEnabled) {
+    
+    if(&o == &Throttle) { // event on device
+      
+      if(x == APENG) { // event on  APENG
+        
+        if(o[x]) { // APENG pressed
+        
+          if(!APcRun) { // AP Module is stopped
+          
+            // Enable AP
+            ActKey(KEYON+APcMap[0]); 
+            if(APcLed) 
+              ActKey(PULSE+KEYON+LED(&Throttle,LED_ONOFF,LED_CURRENT+APcLed)); // LED AP on
+              
+            // Enable AP submode according selector
+            if(o[APPAT]) {
+              ActKey(KEYON+CHAIN(D(34),APcMap[2])); // mode APPAT 
+              APcCur = 2;
+            } else if(o[APALT]) {
+              ActKey(KEYON+CHAIN(D(34),APcMap[4])); // mode APALT
+              APcCur = 4;
+            } else {
+              ActKey(KEYON+CHAIN(D(34),APcMap[3])); // mode APAH 
+              APcCur = 3;
+            }
+            
+            APcRun = 1;
+            
+          } else { // AP Module is running
+          
+            // Disable AP
+            ActKey(KEYON+APcMap[1]); // AP Disconnect
+            
+            if(APcLed) 
+              ActKey(PULSE+KEYON+LED(&Throttle,LED_ONOFF,LED_CURRENT-APcLed)); // LED AP off
+              
+            APcCur = 0;
+            APcRun = 0;
+          }
+        }
+        
+        return 0;
+        
+      } // if(b == APENG)
+      
+      if(x == APPAT | x == APALT) { // event on AP selector
+      
+        if(APcRun) {
+        
+          // Toggle off old AP submode if needed
+          if(APcCur > 0) {
+             ActKey(KEYON+APcMap[APcCur]);
+          }
+        
+          // Enable AP submode according selector
+          if(o[APPAT]) {
+            ActKey(KEYON+CHAIN(D(34),APcMap[2])); // mode APPAT 
+            APcCur = 2;
+          } else if(o[APALT]) {
+            ActKey(KEYON+CHAIN(D(34),APcMap[4])); // mode APALT
+            APcCur = 4;
+          } else {
+            ActKey(KEYON+CHAIN(D(34),APcMap[3])); // mode APAH 
+            APcCur = 3;
+          }
+        }
+        
+        return 0;
+        
+      } // if(b == APPAT | b == APALT)
+      
+    } // if(&d == &Throttle)
+    
+  } // if(APcEnabled)
+  
+  return 0;
+}
